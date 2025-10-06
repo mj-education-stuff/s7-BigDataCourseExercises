@@ -30,6 +30,130 @@ helm install --values spark-values.yaml spark oci://registry-1.docker.io/bitnami
 kubectl port-forward svc/spark-master-svc 8080:80
 ```
 
+#### **Solution**
+
+**By following these steps, you learn how to deploy and manage a distributed Spark environment on Kubernetes using Helm, and how to verify that your cluster is running as expected.**
+
+##### **Step 1: Inspect the `spark-values.yaml` File**
+
+**What you do:**  
+Open and review the `spark-values.yaml` file in your project.
+
+**Why:**  
+This file contains configuration values for the Spark Helm chart. It defines how Spark will be deployed on your Kubernetes cluster, such as:
+- The number of worker nodes
+- Resource limits (CPU, memory)
+- Service types and ports
+- Environment variables
+
+**Technical background:**  
+Helm uses these values to customize the deployment. Understanding this file helps you know what your Spark cluster will look like and how it will behave.
+
+spark-values.yaml:
+```yaml
+image:
+  repository: bitnami/spark
+  tag: 3.5.2-debian-12-r1
+master:
+  resources:
+    limits:
+      cpu: 1
+      memory: 2Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+worker:
+  replicaCount: 2
+  resources:
+    limits:
+      cpu: 1
+      memory: 2Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+```
+
+Here’s what each part of your spark-values.yaml configuration means:
+
+**image**
+- **repository: bitnami/spark**  
+  Specifies the Docker image repository to use for Spark. Here, it’s the official Bitnami Spark image.
+- **tag: 3.5.2-debian-12-r1**  
+  Specifies the exact version of the Spark image (Spark 3.5.2, based on Debian 12).
+
+**master**
+- **resources:**  
+  Sets resource constraints for the Spark master pod.
+  - **limits:**  
+    - **cpu: 1** — The master pod can use up to 1 CPU core.
+    - **memory: 2Gi** — The master pod can use up to 2 GiB of RAM.
+  - **requests:**  
+    - **cpu: 1** — The master pod requests 1 CPU core when scheduled.
+    - **memory: 1Gi** — The master pod requests 1 GiB of RAM when scheduled.
+
+**Requests** are the minimum resources guaranteed; **limits** are the maximum allowed.
+
+**worker**
+- **replicaCount: 2**  
+  Deploys 2 Spark worker pods.
+- **resources:**  
+  Sets resource constraints for each worker pod (same as master).
+  - **limits:**  
+    - **cpu: 1** — Each worker can use up to 1 CPU core.
+    - **memory: 2Gi** — Each worker can use up to 2 GiB of RAM.
+  - **requests:**  
+    - **cpu: 1** — Each worker requests 1 CPU core.
+    - **memory: 1Gi** — Each worker requests 1 GiB of RAM.
+
+**Summary:**  
+This configuration deploys Spark using the Bitnami image, with 1 master and 2 worker pods. Each pod is allocated 1 CPU and 1–2 GiB RAM, ensuring resource control and cluster stability.
+
+##### **Step 2: Install the Spark Helm Chart**
+
+**Command:**
+```bash
+helm install --values spark-values.yaml spark oci://registry-1.docker.io/bitnamicharts/spark --version 9.2.10
+```
+
+**What you do:**  
+You use Helm (a Kubernetes package manager) to deploy Spark using the Bitnami Spark Helm chart, with your custom settings from `spark-values.yaml`.
+
+**Why:**  
+This command automates the creation of all the Kubernetes resources needed for Spark (pods, services, etc.), saving you from writing complex YAML files by hand.
+
+**Technical background:**  
+- `helm install` creates a new release (deployment) named `spark`.
+- `--values spark-values.yaml` tells Helm to use your custom configuration.
+- The chart from Bitnami contains templates for deploying Spark master and worker nodes, services, and more.
+- The `oci://...` URL is the location of the Helm chart in the OCI registry.
+
+##### **Step 3: Inspect the Spark UI and Validate Worker Nodes**
+
+**Command:**
+```bash
+kubectl port-forward svc/spark-master-svc 8080:80
+```
+
+**What you do:**  
+You forward port 80 of the Spark master service in your Kubernetes cluster to port 8080 on your local machine.
+
+**Why:**  
+This allows you to access the Spark web UI in your browser at [http://localhost:8080](http://localhost:8080), even though Spark is running inside Kubernetes.
+
+**Technical background:**  
+- `kubectl port-forward` creates a tunnel from your local machine to the Kubernetes service.
+- The Spark UI shows the status of the cluster, including the number of worker nodes, running jobs, and resource usage.
+- You should see **two worker nodes** alive, as specified in your configuration.
+
+##### **Summary Table**
+
+| Step | What you do | Why | Technical background |
+|------|-------------|-----|---------------------|
+| 1 | Inspect `spark-values.yaml` | Understand deployment settings | Helm values file customizes the chart |
+| 2 | Install Helm chart | Deploy Spark easily | Helm automates Kubernetes resource creation |
+| 3 | Port-forward Spark UI | Access Spark dashboard | View cluster status and workers in browser |
+
+
 ### Exercise 2 - Running a Spark job locally and in your deployment
 
 The first exercise is to run a Spark job that estimates pi. The program is written in Python and is an example of how to
@@ -91,6 +215,98 @@ Change this line of code in [pi-estimation.py](./pi-estimation.py) to point to `
 | **Deployment Modes**    | Supports only local mode                                 | Supports local, client, and cluster deployment modes                     |
 | **Job Configuration**   | Configuration is hard-coded or via environment variables | Can pass configurations via command-line options                         |
 | **Output and Results**  | Printed to console                                       | Can be redirected to files, databases, or external storage               |
+
+
+#### **Solution**
+
+**This exercise helps you bridge the gap between local Spark development and running scalable, distributed jobs in a real cluster environment.**
+
+##### **Step 1: Inspect the `pi-estimation.py` File**
+
+**What you do:**  
+Open and read the `pi-estimation.py` Python script.
+
+**Why:**  
+This script contains a Spark job that estimates the value of pi using a Monte Carlo method. Understanding the code helps you see how Spark jobs are structured and how they can be run both locally and on a cluster.
+
+**Technical background:**  
+- The script uses Spark’s parallel processing to estimate pi by randomly generating points and checking how many fall inside a unit circle.
+- The number of partitions determines how the work is split across the cluster or your local CPU cores.
+
+##### **Step 2: Run the Script Locally**
+
+**Command:**  
+```bash
+python pi-estimation.py <NUMBER_OF_PARTITIONS>
+```
+or  
+```bash
+spark-submit pi-estimation.py <NUMBER_OF_PARTITIONS>
+```
+
+**What you do:**  
+You run the script on your local machine, either as a regular Python script or using `spark-submit`.
+
+**Why:**  
+Running locally is useful for development, debugging, and understanding how the code works before scaling up.
+
+**Technical background:**  
+- When run locally, Spark uses your computer’s resources.
+- The number of partitions affects how many parallel tasks Spark creates. More partitions can improve parallelism up to the number of available CPU cores, but too many can add overhead.
+
+##### **Step 3: How Does the Number of Partitions Affect the Result?**
+
+**Explanation:**  
+- **Accuracy:** The number of partitions does **not** affect the mathematical accuracy of the pi estimation (that depends on the total number of points simulated).
+- **Performance:** More partitions can improve performance by allowing more parallel tasks, but too many can cause overhead and slow things down.
+- **Resource Utilization:** On a cluster, more partitions can better utilize distributed resources.
+
+##### **Step 4: Run the Script in the Kubernetes Cluster**
+
+**What you do:**  
+Update the script to use the Kubernetes Spark environment:
+
+```python
+spark = get_spark_context(app_name="Pi estimation", config=SPARK_ENV.K8S)
+```
+
+Then submit the job to your Spark cluster (inside Kubernetes):
+
+```bash
+spark-submit pi-estimation.py <NUMBER_OF_PARTITIONS>
+```
+
+**Why:**  
+This lets you leverage the distributed computing power of your Spark cluster, which can handle much larger workloads than your local machine.
+
+**Technical background:**  
+- Spark jobs submitted to the cluster are distributed across multiple worker nodes.
+- The cluster manager (Kubernetes) handles resource allocation, scheduling, and fault tolerance.
+
+##### **Step 5: Compare Local vs. Cluster Execution**
+
+- **Does the number of partitions affect runtime?**  
+  Yes. On a cluster, more partitions can improve parallelism and reduce runtime, up to the point where you saturate the available resources.
+- **How does runtime compare to local?**  
+  The cluster should be faster for large jobs, especially as you increase the number of partitions and data size, because it can use many machines in parallel.
+
+##### **Key Differences: `python <SCRIPT.py>` vs. `spark-submit <SCRIPT.py>`**
+
+| Aspect                | `python <SCRIPT.py>` (Local)         | `spark-submit <SCRIPT.py>` (Cluster)           |
+|-----------------------|--------------------------------------|------------------------------------------------|
+| Execution Mode        | Local Python process                 | Distributed Spark job                          |
+| Resource Management   | Local machine only                   | Managed by cluster (Kubernetes, YARN, etc.)    |
+| Parallelism           | Limited to local CPU cores           | Scales across many nodes                       |
+| Use Case              | Development, testing                 | Production, large-scale data processing        |
+| Error Handling        | Console output                       | Logs in cluster, may require web UI to debug   |
+| Dependencies          | Manual in script                     | Can be specified via `--packages` or `--jars`  |
+
+### **Summary**
+
+- You learn how to run Spark jobs both locally and on a cluster.
+- You see how partitioning affects parallelism and performance.
+- You understand the difference between local development and distributed production jobs in Spark.
+
 
 ### Exercise 3 - Analyzing files using Spark jobs
 
