@@ -43,6 +43,131 @@ the [hive-metastore.yaml](./hive-metastore.yaml) file.
 
 **Task**: Apply the [hive.yaml](./hive.yaml) file.
 
+#### **Solution**
+
+**Exercise 1 - Hive: Step-by-Step Solution**
+
+##### **Background**
+
+- **Hive** is a data warehouse system for querying and analyzing data stored in distributed storage (like HDFS).
+- **Hive Metastore** is a service that stores metadata about Hive tables, schemas, and partitions. It requires a relational database (here, PostgreSQL).
+- **HDFS** is required because Hive reads/writes data from/to HDFS.
+
+##### **Step 1: Ensure HDFS is Running**
+
+**What you do:**  
+Check that your HDFS cluster (namenode and datanodes) is running in your Kubernetes namespace.
+
+**Why:**  
+Hive stores and queries data in HDFS. If HDFS isn’t running, Hive won’t work.
+
+**How:**  
+```bash
+kubectl get pods
+```
+Look for pods like `namenode-0`, `datanode-0`, etc.
+
+##### **Step 2: Deploy PostgreSQL for Hive Metastore**
+
+**What you do:**  
+Deploy a PostgreSQL database using Helm, which will be used by the Hive Metastore to store metadata.
+
+**Why:**  
+Hive Metastore needs a relational database to store information about tables, partitions, and schemas.
+
+**How:**  
+Copy and run this command as a single line in your terminal (remove the backslashes and newlines if needed):
+
+```bash
+helm install postgresql --version=12.1.5 --set auth.username=root --set auth.password=pwd1234 --set auth.database=hive --set primary.extendedConfiguration="password_encryption=md5" --repo https://charts.bitnami.com/bitnami postgresql
+```
+Within the PostgreSQL client pod, you can connect to the database using:
+```bash
+psql -U root -d postgres
+```
+
+Once inside the psql prompt, you can check if the hive database exists with:
+```sql
+\l
+````
+
+If it doesn't exist, you can create it with:
+```sql
+CREATE DATABASE hive;
+```
+
+Exit with
+```sql
+\q
+```
+
+**Technical background:**  
+- `helm install` deploys the PostgreSQL chart.
+- Sets up a database called `hive` with user `root` and password `pwd1234`.
+- The `password_encryption=md5` is required for Hive compatibility.
+
+##### **Step 3: Apply the Hive Metastore Deployment**
+
+**What you do:**  
+Apply the Kubernetes manifest for the Hive Metastore service.
+
+**Why:**  
+This service acts as the metadata catalog for Hive, connecting to the PostgreSQL database you just set up.
+
+**How:**  
+```bash
+kubectl apply -f hive-metastore.yaml
+```
+
+**Technical background:**  
+- The manifest describes a deployment and service for the Hive Metastore.
+- It connects to the PostgreSQL database using the credentials you set up.
+
+##### **Step 4: Deploy Hive Service**
+
+**What you do:**  
+Apply the Kubernetes manifest for the Hive service itself.
+
+**Why:**  
+This will deploy HiveServer2, which allows you to connect to Hive using JDBC/ODBC or web UI.
+
+**How:**  
+```bash
+kubectl apply -f hive.yaml
+```
+
+**Technical background:**  
+- This manifest deploys HiveServer2, which is the main entry point for running Hive queries.
+- It connects to the Hive Metastore service you just deployed.
+
+##### **Step 5: Validate Deployments**
+
+**What you do:**  
+Check that all pods and services are running.
+
+**Why:**  
+To ensure everything is set up correctly before you start using Hive.
+
+**How:**  
+```bash
+kubectl get pods
+kubectl get svc
+```
+Look for pods/services named `postgresql`, `hive-metastore`, and `hiveserver2`.
+
+##### **Summary Table**
+
+| Step | Command | Purpose |
+|------|---------|---------|
+| 1 | `kubectl get pods` | Ensure HDFS is running |
+| 2 | `helm install postgresql ...` | Deploy PostgreSQL for Hive Metastore |
+| 3 | `kubectl apply -f hive-metastore.yaml` | Deploy Hive Metastore service |
+| 4 | `kubectl apply -f hive.yaml` | Deploy Hive service (HiveServer2) |
+| 5 | `kubectl get pods` / `kubectl get svc` | Validate everything is running |
+
+
+**You now have Hive and its metastore running, ready to connect to HDFS and start querying data!**  
+
 ### Exercise 2 - Count words in Alice in Wonderland with Hive
 
 We will now analyze the Alice in Wonderland text similarly to what we did
@@ -235,6 +360,168 @@ WHERE input__file__name = 'hdfs://namenode:9000/<hdfs-path>/<file>';
 
 The SQL statement above will only count the amount of words for files that match a specific path.
 
+#### **Solution**
+step-by-step guide for Exercise 2 – Count words in Alice in Wonderland with Hive
+
+You have now analyzed Alice in Wonderland using Hive SQL, just like you did with Python and Spark!
+
+##### **Step 1: Upload Alice in Wonderland to HDFS**
+
+**Why:** Hive reads data from HDFS.  
+**How:**
+1. Download the file (if not already done):
+   ```bash
+   curl -o alice.txt https://www.gutenberg.org/files/11/11-0.txt
+   ```
+2. Start an HDFS CLI pod (if needed):
+   ```bash
+   kubectl run hdfs-cli -it --image apache/hadoop:3 -- bash
+   ```
+3. Create a folder in HDFS (e.g., `/alice`):
+   ```bash
+   hdfs dfs -mkdir /alice
+   ```
+4. Upload the file:
+   ```bash
+   hdfs dfs -put alice.txt /alice/
+   ```
+
+##### **Step 2: Connect to Hive Web UI and Thrift API**
+
+**Why:** You need to interact with Hive using a SQL client (like DBeaver).
+
+**How:**
+- Port-forward Hive Web UI:
+  ```bash
+  kubectl port-forward svc/hiveserver2 10002:10002
+  ```
+  Open [http://localhost:10002](http://localhost:10002/) in your browser.
+
+- Port-forward Hive Thrift API:
+  ```bash
+  kubectl port-forward svc/hiveserver2 10000:10000
+  ```
+
+##### **Step 3: Connect to Hive with DBeaver**
+
+**Why:** DBeaver provides a graphical SQL editor for Hive.
+
+**How:**
+1. Download and install [DBeaver](https://dbeaver.io/).
+   ```zsh
+   brew install --cask dbeaver-community
+   ```
+2. Create a new connection:
+   - Database → New Database Connection → Search "Hive" → Next.
+   - "Connect by: URL" → `jdbc:hive2://localhost:10000`
+   - Test connection → Finish.
+3. Open a SQL editor (right-click connection → SQL Editor → Open SQL script).
+
+##### **Step 4: Show Tables**
+
+**Why:** To verify your connection and see existing tables.
+
+**How:**  
+Type and run:
+```sql
+SHOW TABLES;
+```
+You should see zero tables if this is a new database.
+
+##### **Step 5: Create a Database**
+
+**Why:** Organize your tables in a logical namespace.
+
+**How:**  
+```sql
+CREATE DATABASE IF NOT EXISTS bucket
+LOCATION 'hdfs://namenode:9000/user/hive/warehouse/';
+```
+You can use any name instead of `bucket`.
+
+##### **Step 6: Create a Table for Alice in Wonderland**
+
+**Why:** To map the HDFS file as a Hive table.
+
+**How:**  
+```sql
+CREATE TABLE bucket.text (
+    line STRING
+) STORED AS TEXTFILE
+LOCATION 'hdfs://namenode:9000/alice/';
+```
+- Replace `/alice/` with your actual HDFS folder if different.
+
+##### **Step 7: Preview the Data**
+
+**Why:** To check that the table is reading the file correctly.
+
+**How:**  
+```sql
+SELECT * FROM bucket.text LIMIT 100;
+```
+You should see the first 100 lines of the book.
+
+##### **Step 8: Count Total Words**
+
+**Why:** To get the total word count in the text.
+
+**How:**  
+```sql
+SELECT SUM(SIZE(SPLIT(line, ' '))) AS word_count
+FROM bucket.text;
+```
+- `SPLIT(line, ' ')` splits each line into words.
+- `SIZE(...)` counts words per line.
+- `SUM(...)` totals all words.
+
+##### **Step 9: Find the 10 Most Used Words**
+
+**Why:** To analyze word frequency.
+
+**How:**  
+```sql
+SELECT word, COUNT(*) AS count
+FROM (
+    SELECT EXPLODE(SPLIT(line, ' ')) AS word
+    FROM bucket.text
+) temp
+GROUP BY word
+ORDER BY count DESC
+LIMIT 10;
+```
+- `SPLIT` splits lines into words.
+- `EXPLODE` turns arrays into rows.
+- `GROUP BY` and `COUNT(*)` aggregate word counts.
+- `ORDER BY ... LIMIT 10` gives the top 10.
+
+##### **Step 10: (Optional) Count Words Per File**
+
+**Why:** To see word counts per file (useful if you have multiple files).
+
+**How:**  
+```sql
+SELECT input__file__name AS path, SUM(SIZE(SPLIT(line, ' '))) AS word_count
+FROM bucket.text
+GROUP BY input__file__name;
+```
+
+##### **Summary Table**
+
+| Step | Command/Action | Purpose |
+|------|----------------|---------|
+| 1 | Upload file to HDFS | Make data available to Hive |
+| 2 | Port-forward Hive | Access Hive services locally |
+| 3 | Connect with DBeaver | SQL editor for Hive |
+| 4 | SHOW TABLES | Verify connection |
+| 5 | CREATE DATABASE | Organize tables |
+| 6 | CREATE TABLE | Map HDFS file to Hive |
+| 7 | SELECT * LIMIT 100 | Preview data |
+| 8 | SUM(SIZE(SPLIT...)) | Count total words |
+| 9 | EXPLODE + GROUP BY | Top 10 words |
+| 10 | GROUP BY file | Per-file stats (optional) |
+
+
 ### Exercise 3 - Backblaze Hard Drive Data
 
 [Backblaze](https://www.backblaze.com/) is a cloud backup and storage service. They have a lot of hard drives and
@@ -330,6 +617,176 @@ ORDER BY count DESC;
 the [blog post about the drive stats](https://www.backblaze.com/blog/backblaze-drive-stats-for-q2-2023/). For example,
 the drive model `TOSHIBA MG07ACA14TA` is the most used with 38101 total drives. This is the same amount as what
 Backblaze shows in their blog post.
+
+#### **Solution**
+step-by-step guide for **Exercise 3 – Backblaze Hard Drive Data with Hive**
+
+You have now analyzed real-world hardware data using Hive SQL!
+
+##### **Step 1: Download and Prepare the Data**
+
+**Why:** You need the Backblaze hard drive data as a CSV file to analyze it in Hive.
+
+**How:**
+1. Download the 2023 Q2 data from [Backblaze Hard Drive Test Data](https://www.backblaze.com/cloud-storage/resources/hard-drive-test-data).
+2. Unzip the downloaded file.
+3. Locate `2023-06-30.csv` inside the extracted folder.
+
+##### **Step 2: Upload the CSV File to HDFS**
+
+**Why:** Hive reads data from HDFS, so you must upload the CSV file there.
+
+**How:**
+1. Start an HDFS CLI pod if needed:
+   ```bash
+   kubectl run hdfs-cli -it --image apache/hadoop:3 -- bash
+   ```
+
+1. Load files into pod
+   ```bash
+    mkdir e5
+   ```
+
+1. Copy files into pod or download directly from pod
+   ```bash
+   kubectl cp data_Q2_2023/. hdfs-cli:/opt/hadoop/e5
+   ```
+
+   ```bash
+   curl -O https://f001.backblazeb2.com/file/Backblaze-Hard-Drive-Data/data_Q2_2023.zip
+   ```
+   
+   ```bash
+   python -c "import zipfile; zipfile.ZipFile('data_Q2_2023.zip').extractall('.')" 
+    ```
+
+1. Create a new (empty) folder in HDFS, e.g., `/backblaze`:
+   ```bash
+   hdfs dfs -mkdir /backblaze
+   ```
+
+1. Upload the CSV file:
+   ```bash
+   hdfs dfs -put /opt/hadoop/e5/data_Q2_2023/*.csv /backblaze/
+   ```
+   *(Make sure the folder is empty before uploading!)*
+
+##### **Step 3: Create a Hive Table for the CSV Data**
+
+**Why:** You need to define a Hive table that maps to the CSV file structure.
+
+**How:**
+1. Connect to Hive using DBeaver (or your preferred SQL client).
+2. Run the following SQL (adjust the folder path if needed):
+
+   ```sql
+   CREATE EXTERNAL TABLE IF NOT EXISTS bucket.backblaze (
+     `date` STRING,
+     serial_number STRING,
+     model STRING,
+     capacity_bytes STRING
+   )
+   ROW FORMAT DELIMITED
+   FIELDS TERMINATED BY ','
+   STORED AS TEXTFILE
+   LOCATION 'hdfs://namenode:9000/backblaze/'
+   TBLPROPERTIES (
+     'skip.header.line.count'='1'
+   );
+   ```
+   - This creates an external table over your CSV file.
+   - `skip.header.line.count='1'` skips the header row.
+
+##### **Step 4: Preview the Data**
+
+**Why:** To verify the table is reading the CSV file correctly.
+
+**How:**
+```sql
+SELECT * FROM bucket.backblaze LIMIT 100;
+```
+- You should see the first 100 rows, including columns like date, serial number, model, and capacity.
+
+##### **Step 5: Analyze the Data with Hive SQL**
+
+**Why:** To answer questions about drive models, counts, and capacities.
+
+**How:**
+
+Ensure portforward is running for hiveserver2
+
+a) Total count of each model of hard drive
+```sql
+SELECT model, COUNT(*) AS count
+FROM bucket.backblaze
+WHERE input__file__name = 'hdfs://namenode:9000/backblaze/2023-06-30.csv'
+GROUP BY model
+ORDER BY count DESC;
+```
+
+b) Capacity of the different hard drive models (in GB) -> WDC WUH722222ALE6L4	with 22000 GB
+```sql
+SELECT model, FLOOR(CAST(capacity_bytes AS BIGINT) / POWER(10, 9)) AS capacity_gigabytes
+FROM bucket.backblaze
+WHERE input__file__name = 'hdfs://namenode:9000/backblaze/2023-06-30.csv'
+GROUP BY model, capacity_bytes;
+ORDER BY capacity_gigabytes DESC;
+```
+
+- This SQL statement:
+   ```sql
+   SELECT model, FLOOR(CAST(capacity_bytes AS BIGINT) / POWER(10, 9)) AS capacity_gigabytes
+   ```
+
+   **Explanation:**
+
+   - `model`: Selects the hard drive model from the table.
+   - `capacity_bytes`: Is a column (as a string) representing the drive's capacity in bytes.
+   - `CAST(capacity_bytes AS BIGINT)`: Converts the string value to a number (BIGINT) so you can do math with it.
+   - `POWER(10, 9)`: Calculates 1,000,000,000 (one billion), which is the number of bytes in a gigabyte (GB).
+   - `CAST(capacity_bytes AS BIGINT) / POWER(10, 9)`: Converts the capacity from bytes to gigabytes.
+   - `FLOOR(...)`: Rounds the result down to the nearest whole number (removes decimals).
+   - `AS capacity_gigabytes`: Gives this calculated value the column name `capacity_gigabytes` in the result.
+
+   **In summary:**  
+   This query shows, for each hard drive model, the capacity in whole gigabytes (GB), by converting the `capacity_bytes` value from bytes to GB and rounding down.
+
+c) Total capacity of each model of hard drive (in TB)
+```sql
+SELECT model,
+       FLOOR(CAST(capacity_bytes AS BIGINT) / POWER(10, 9)) AS capacity_gigabytes,
+       FLOOR(CAST(capacity_bytes AS BIGINT) / POWER(10, 9)) * COUNT(*) / 1000 AS total_capacity_terabytes,
+       COUNT(*) AS count
+FROM bucket.backblaze
+WHERE input__file__name = 'hdfs://namenode:9000/backblaze/2023-06-30.csv'
+GROUP BY model, capacity_bytes
+ORDER BY total_capacity_terabytes DESC;
+```
+
+d) Most used hard drive model
+- Use the first query above and look for the model with the highest count.
+ TOSHIBA MG07ACA14TA is the most used with 38101 total drives
+
+e) Hard drive model with the largest total capacity
+- Use the third query above and look for the model with the highest `total_capacity_terabytes`.
+
+##### **Step 6: Compare Results**
+
+**Why:** To validate your analysis, compare your results to the [Backblaze Q2 2023 blog post](https://www.backblaze.com/blog/backblaze-drive-stats-for-q2-2023/).
+
+- For example, the model `TOSHIBA MG07ACA14TA` should have 38,101 drives, matching the blog post.
+
+##### **Summary Table**
+
+| Step | Command/Action | Purpose |
+|------|----------------|---------|
+| 1 | Download & unzip data | Get CSV file |
+| 2 | Upload to HDFS | Make data available to Hive |
+| 3 | CREATE TABLE | Map CSV to Hive table |
+| 4 | SELECT * LIMIT 100 | Preview data |
+| 5 | SQL queries | Analyze models, counts, capacities |
+| 6 | Compare to blog | Validate results |
+
 
 ### Exercise 4 - Compose a MongoDB cluster
 
@@ -556,6 +1013,173 @@ db.getCollection('INGESTION').find({"payload": {$regex: /^{\"sensor_id\": 6/}}).
 **Task**: Formalize a question to answer about the documents in MongoDB and create a proper query to answer this
 question. Post the question and your solution in our Discord channel called "exercises".
 
+##### **Solution**
+**step-by-step guide** for **Exercise 4 – Compose a MongoDB cluster**
+
+##### **Step 1: Deploy the MongoDB Cluster**
+
+**Why:**  
+You need a running MongoDB instance (and a web UI) to store and query JSON documents.
+
+**How:**
+1. **Review the manifest:**  
+   Open and read through `mongodb.yaml` to understand what resources (pods, services, PVCs) will be created.
+
+2. **Apply the manifest:**  
+   ```bash
+   kubectl apply -f mongodb.yaml
+   ```
+   This will deploy MongoDB and the mongo-express web UI.
+
+##### **Step 2: Interact with MongoDB**
+
+**A. Using the Web-based Interface (mongo-express)**
+
+**Why:**  
+mongo-express provides a simple web UI for browsing and editing MongoDB data.
+
+**How:**
+1. **Port-forward the mongo-express service:**  
+   ```bash
+   kubectl port-forward svc/mongo-express 8081
+   ```
+2. **Open your browser:**  
+   Go to [http://127.0.0.1:8081](http://127.0.0.1:8081)
+
+3. **Login:**  
+   - Username: `admin`
+   - Password: `pass`
+
+4. **Validate:**  
+   - Check the hostname of the MongoDB server in the UI.
+   - Confirm it matches the name of the MongoDB pod (see with `kubectl get pods`).
+
+5. **Explore:**  
+   - Browse databases, collections, and documents.
+   - Review [mongo-express documentation](https://github.com/mongo-express/mongo-express) and [MongoDB docs](https://www.mongodb.com/docs/manual/core/databases-and-collections/) to understand terminology.
+
+**B. Using the MongoDB VS Code Extension**
+
+**Why:**  
+This extension lets you interact with MongoDB directly from VS Code, including running queries and viewing data.
+
+**How:**
+1. **Install the extension:**  
+   [MongoDB for VS Code](https://marketplace.visualstudio.com/items?itemName=mongodb.mongodb-vscode)
+
+2. **Port-forward the MongoDB service:**  
+   ```bash
+   kubectl port-forward svc/mongodb 27017
+   ```
+
+3. **Connect in VS Code:**  
+   Use the connection string:  
+   ```
+   mongodb://admin:password@127.0.0.1:27017
+   ```
+
+4. **Explore playgrounds:**  
+   - Click "Create New Playground" in the extension.
+   - Run the playground to insert and query documents.
+   - Check the `mongodbVSCodePlaygroundDB` and `sales` collection in both VS Code and mongo-express.
+
+##### **Step 3: Integrate MongoDB with Kafka Connect**
+
+**Why:**  
+To automatically ingest data from a Kafka topic (`INGESTION`) into MongoDB.
+
+**How:**
+1. **Ensure the `INGESTION` topic has data:**  
+   If not, revisit the Kafka producer exercise to generate records.
+
+2. **Port-forward Kafka Connect REST API:**  
+   ```bash
+   kubectl port-forward svc/kafka-connect 8083
+   ```
+
+3. **Post the connector configuration:**  
+   ```bash
+   curl -X POST \
+   http://127.0.0.1:8083/connectors \
+   -H 'Content-Type: application/json' \
+   -d '{
+     "name": "mongodb-sink",
+     "config": {
+       "connection.password": "password",
+       "connection.uri": "mongodb://admin:password@mongodb:27017",
+       "connection.url": "mongodb://mongodb:27017",
+       "connection.username": "admin",
+       "connector.class": "com.mongodb.kafka.connect.MongoSinkConnector",
+       "database": "kafka",
+       "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+       "key.converter.schemas.enable": "true",
+       "output.format.key": "json",
+       "output.format.value": "json",
+       "post.processor.chain": "com.mongodb.kafka.connect.sink.processor.DocumentIdAdder",
+       "tasks.max": "4",
+       "timeseries.timefield.auto.convert": "false",
+       "topics": "INGESTION",
+       "value.converter": "org.apache.kafka.connect.storage.StringConverter",
+       "value.converter.schemas.enable": "true"
+     }
+   }'
+   ```
+   This creates a sink connector that writes Kafka topic data to MongoDB.
+
+4. **Validate the connector:**  
+   ssh into mongodb
+    ```bash
+    mongosh -u admin -p password --authenticationDatabase admin
+    ```
+
+     ```js
+     use('kafka');
+     ```
+
+     ```js
+     db.getCollection('INGESTION').countDocuments();
+     ```
+   - The count should match the number of records in the Kafka topic.
+
+##### **Step 4: Query Documents in MongoDB**
+
+**Why:**  
+To practice querying JSON documents and answer questions about your data.
+
+**How:**
+1. **Count documents with `sensor_id=6`:**
+   ```js
+   use('kafka');
+   ```
+
+   ```js
+   db.getCollection('INGESTION').find({"payload": {$regex: /^{\"sensor_id\": 6/}}).count();
+   ```
+   This uses a regex to match documents where the payload starts with `"sensor_id": 6`.
+
+2. **Formulate your own question:**  
+   - Example: *How many documents have a temperature above 25°C?*
+   - Query (assuming payload is parsed as an object):
+     ```js
+     use('kafka');
+     ```
+
+     ```js
+     db.getCollection('INGESTION').find({"payload.temperature": {$gt: 25}}).count();
+     ```
+   - If payload is a string, you may need to use regex or parse it.
+
+##### **Summary Table**
+
+| Step | Command/Action | Purpose |
+|------|----------------|---------|
+| 1 | `kubectl apply -f mongodb.yaml` | Deploy MongoDB and mongo-express |
+| 2A | `kubectl port-forward svc/mongo-express 8081` | Access web UI |
+| 2B | `kubectl port-forward svc/mongodb 27017` | Connect with VS Code extension |
+| 3 | Kafka Connect config + curl | Ingest Kafka data into MongoDB |
+| 4 | MongoDB queries | Analyze and explore your data |
+
+
 ### Exercise 5 - Highly available and scalable Redis cluster
 
 We will now set up a highly available and scalable [Redis](https://redis.io/) cluster
@@ -642,6 +1266,103 @@ pod that you just wrote the value to and then try to get the key again using the
 You should see that you are still able to get the key even though the primary node was killed. This is very cool 😎.
 
 **Task**: What tactics does Redis Cluster + Redis Sentinel use?
+
+#### **Solution**
+step-by-step guide for **Exercise 5 – Highly available and scalable Redis cluster**
+
+You now have a highly available, scalable Redis cluster with automatic failover and sharding!
+
+##### **Step 1: Install the Redis Cluster with Helm**
+
+**Why:**  
+You need a Redis cluster with high availability and sharding.
+
+**How:**  
+```bash
+helm install redis oci://registry-1.docker.io/bitnamicharts/redis-cluster --version 11.0.4
+```
+- This deploys a 6-node Redis Cluster (3 primaries, 3 replicas) using the Bitnami Helm chart.
+
+##### **Step 2: Retrieve the Redis Password**
+
+**Why:**  
+The Bitnami chart generates a random password stored in a Kubernetes secret.
+
+**How (Mac/Linux):**
+```bash
+export REDIS_PASSWORD_BASE64=$(kubectl get secret redis-redis-cluster -o jsonpath="{.data.redis-password}")
+```
+```bash
+export REDIS_PASSWORD=$(echo $REDIS_PASSWORD_BASE64 | base64 --decode)
+```
+```bash
+echo $REDIS_PASSWORD
+```
+- This decodes the password for use with the Redis CLI.
+
+##### **Step 3: Start a Redis Cluster Client Pod**
+
+**Why:**  
+You need a shell with the Redis CLI to interact with the cluster.
+
+**How:**  
+```bash
+kubectl run redis-cluster-cli -it --env REDIS_PASSWORD=$REDIS_PASSWORD --image docker.io/bitnami/redis-cluster:7.4.0-debian-12-r1 -- sleep infinity
+```
+- This creates an interactive pod with the Redis CLI and your password set as an environment variable.
+
+##### **Step 4: Connect to the Redis Cluster**
+
+**Why:**  
+To interact with the cluster and test its behavior.
+
+**How (inside the client pod):**
+```bash
+redis-cli -c -h redis-redis-cluster -a $REDIS_PASSWORD
+```
+- The `-c` flag enables cluster mode.
+
+##### **Step 5: Test Redis Cluster Functionality**
+
+**A. Set and Get a Key**
+```bash
+SET foo "bar"
+```
+```bash
+GET foo
+```
+- Observe which node handles the key (the CLI will show the host).
+
+**B. Check Pod IPs**
+```bash
+exit  # Exit redis-cli, stay in the bash shell
+kubectl get pods -l app.kubernetes.io/instance=redis -o wide
+```
+- Compare the IP shown by `redis-cli` to the pod IPs to see which pod stores your key.
+
+**C. Test Failover**
+- Delete the pod that holds your key:
+  ```bash
+  kubectl delete pod <pod-name>
+  ```
+- Try `GET foo` again in `redis-cli`. You should still get the value, as a replica is promoted to primary.
+
+##### **Step 6: Answer – What tactics does Redis Cluster + Redis Sentinel use?**
+
+**Redis Cluster tactics:**
+- **Sharding:** Keys are distributed across multiple primary nodes using hash slots, enabling horizontal scaling.
+- **Replication:** Each primary has at least one replica for redundancy.
+- **Automatic failover:** If a primary fails, a replica is automatically promoted to primary.
+- **Redirection:** Clients are redirected to the correct node for a given key.
+
+**Redis Sentinel tactics:**
+- **Monitoring:** Continuously checks if primaries and replicas are up.
+- **Automatic failover:** Detects failures and promotes replicas to primaries.
+- **Notification:** Notifies clients and other nodes about topology changes.
+- **Configuration management:** Updates clients with the new cluster topology.
+
+**Summary:**  
+Redis Cluster provides sharding and replication for scalability and availability. Redis Sentinel monitors nodes and automates failover, ensuring minimal downtime and data loss.
 
 ## Step-by-step guide to clean up
 

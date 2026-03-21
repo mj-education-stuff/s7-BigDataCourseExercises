@@ -130,6 +130,7 @@ This command automates the creation of all the Kubernetes resources needed for S
 ##### **Step 3: Inspect the Spark UI and Validate Worker Nodes**
 
 **Command:**
+- in k9s it's 8080:8080. Maybe error in the task description?
 ```bash
 kubectl port-forward svc/spark-master-svc 8080:80
 ```
@@ -301,7 +302,7 @@ This lets you leverage the distributed computing power of your Spark cluster, wh
 | Error Handling        | Console output                       | Logs in cluster, may require web UI to debug   |
 | Dependencies          | Manual in script                     | Can be specified via `--packages` or `--jars`  |
 
-### **Summary**
+##### **Summary**
 
 - You learn how to run Spark jobs both locally and on a cluster.
 - You see how partitioning affects parallelism and performance.
@@ -338,6 +339,172 @@ spark-submit word-count.py
 **Notice**:You can read about the word count program from Apache Spark [here](https://spark.apache.org/examples.html)
 and [here](https://github.com/apache/spark/blob/c1b12bd56429b98177e5405900a08dedc497e12d/examples/src/main/python/wordcount.py).
 
+#### **Solution**
+
+##### **Step 1: Ensure "Alice in Wonderland" is in HDFS**
+
+**What you do:**  
+Check if the file exists in HDFS. If not, upload it.
+
+**How:**
+1. **Start an HDFS CLI pod** (if you don’t already have one):
+   ```bash
+   kubectl run hdfs-cli -it --image apache/hadoop:3 -- bash
+   ```
+2. **Check if the file exists:**
+   ```bash
+   hdfs dfs -ls /user/<your-username>/alice.txt
+   ```
+3. **If not present, upload it:**
+   - Download the file locally:
+     ```bash
+     curl -O https://www.gutenberg.org/files/11/11-0.txt
+     ```
+   - Upload to HDFS (from inside the pod or by copying the file into the pod first):
+     ```bash
+     hdfs dfs -put 11-0.txt /user/<your-username>/alice.txt
+     ```
+
+**Why:**  
+Spark will read the file from HDFS, so it must be available there.
+
+**Technical background:**  
+HDFS (Hadoop Distributed File System) is a distributed storage system. Spark can efficiently process files stored in HDFS.
+
+##### **Step 2: Inspect `word-count.py`**
+
+**What you do:**  
+Open and read the `word-count.py` script.
+
+**Why:**  
+Understand how Spark jobs are structured and how the word count logic is implemented.
+
+**Technical background:**  
+A typical Spark word count script:
+- Reads a text file into an RDD or DataFrame.
+- Splits lines into words.
+- Maps each word to a (word, 1) pair.
+- Reduces by key to count occurrences.
+- Saves or prints the result.
+
+##### **Step 3: Visualize the Spark DAG**
+
+**What you do:**  
+Try to draw or imagine the Directed Acyclic Graph (DAG) for the job.
+
+**Why:**  
+Understanding the DAG helps you see how Spark breaks down your job into stages and tasks for distributed execution.
+
+**Technical background:**  
+- Each Spark transformation (e.g., `flatMap`, `map`, `reduceByKey`) creates a node in the DAG.
+- Actions (e.g., `collect`, `saveAsTextFile`) trigger execution.
+- The DAG ensures efficient, fault-tolerant execution.
+
+**Example DAG for Word Count:**
+1. **Read file** → RDD of lines
+2. **flatMap** (split lines to words) → RDD of words
+3. **map** (word → (word, 1)) → RDD of pairs
+4. **reduceByKey** (sum counts) → RDD of (word, count)
+5. **collect/save** (action)
+
+[See this StackOverflow answer for a visual example.](https://stackoverflow.com/a/30685279/9698208)
+
+##### **Step 4: Run the Program Locally**
+
+**What you do:**  
+Run the script on your local machine or in an interactive container.
+
+**How:**
+```bash
+spark-submit word-count.py /path/to/alice.txt
+```
+- Replace `/path/to/alice.txt` with the local or HDFS path.
+
+**Why:**  
+Running locally is useful for development and debugging.
+
+**Technical background:**  
+- Spark runs in local mode, using your machine’s resources.
+- The script processes the file and outputs word counts.
+
+##### **Step 5: Run the Program in the Cluster**
+
+**What you do:**  
+Run the script using `spark-submit` with the HDFS file path.
+
+**How:**
+1. Create spark client pod
+- ```bash
+  kubectl run spark-cli --image=bitnami/spark:3.5.2-debian-12-r1 -- sleep infinity
+  ```
+
+2. Within the spark-cli shell, create a directory
+- ```bash
+  mkdir e4
+  ```
+- ```bash
+  mkdir e4/src
+  ```
+3. Copy the scripts from your local machine to the spark-cli pod:
+- ```bash
+  kubectl cp word-count.py spark-cli:/opt/bitnami/spark/e4
+  ```
+- ```bash
+  kubectl cp ./src/utils.py spark-cli:/opt/bitnami/spark/e4/src
+  ```
+
+4. Create a directory in HDFS (within hdfs-cli) and copy the script:
+- ```bash
+  hdfs dfs -mkdir /e4
+  ```
+- ```bash
+  curl -O https://www.gutenberg.org/files/11/11-0.txt
+  ```
+- ```bash
+  hdfs dfs -put 11-0.txt /e4/alice.txt
+  ```
+
+5. Run the Spark job:
+- ```bash
+  spark-submit word-count.py e4/alice.txt
+  ```
+
+**Why:**  
+Running in the cluster leverages distributed resources for scalability.
+
+**Technical background:**  
+- Spark distributes the job across worker nodes.
+- Each node processes a partition of the file in parallel.
+- Results are aggregated and output as specified in the script.
+
+##### **Step 6: Compare Results and Performance**
+
+**What you do:**  
+Compare the output and runtime between local and cluster runs.
+
+**Why:**  
+Understand the benefits of distributed processing and how Spark scales with data and resources.
+
+**Technical background:**  
+- On small files, local and cluster runtimes may be similar.
+- On large files, the cluster should be much faster due to parallelism.
+
+##### **Summary Table**
+
+| Step | What you do | Why | Technical background |
+|------|-------------|-----|---------------------|
+| 1 | Ensure file in HDFS | Spark reads from HDFS | Distributed storage |
+| 2 | Inspect script | Understand logic | Spark transformations/actions |
+| 3 | Visualize DAG | See execution plan | Fault-tolerant, parallel execution |
+| 4 | Run locally | Test/debug | Local Spark mode |
+| 5 | Run in cluster | Scale up | Distributed Spark mode |
+| 6 | Compare results | Learn performance impact | Parallelism, resource utilization |
+
+**References:**
+- [Spark Word Count Example](https://spark.apache.org/examples.html)
+- [DAG in Spark](https://stackoverflow.com/a/30685279/9698208)
+
+
 ### Exercise 4 - Average sample values from JSON files stored in HDFS
 
 Let us assume that you have a dataset of sample records stored in HDFS. The dataset is stored in JSON format and
@@ -358,6 +525,134 @@ and [exercise 7 from lecture 3](../03/README.md#exercise-7---kafka-connect-and-h
 spark-submit avg-modalities.py
 ```
 
+#### **Solution**
+**By following these steps, you learn how to process JSON data in HDFS using Spark, aggregate results efficiently, and interpret distributed computation outputs.**
+
+Calculating Average `payload.modality` per Station with Spark
+
+##### **Step 1: Inspect the `avg-modalities.py` Script**
+
+**What you do:**  
+Open and review the `avg-modalities.py` script.
+
+**Why:**  
+Understanding the script helps you see how Spark reads JSON data, processes it, and computes averages. Typically, the script will:
+- Read JSON files from HDFS into a Spark DataFrame.
+- Extract relevant fields (`station` and `payload.modality`).
+- Group by station and compute the average modality.
+
+**Technical background:**  
+Spark DataFrames make it easy to process structured data (like JSON). Grouping and aggregation are efficient and scalable.
+
+##### **Step 2: Ensure JSON Records Exist in HDFS**
+
+**What you do:**  
+Check if your sample JSON records are present in HDFS at the expected location.
+
+**How:**
+1. **Open an HDFS CLI pod:**
+   ```bash
+   kubectl run hdfs-cli -it --image apache/hadoop:3 -- bash
+   ```
+2. **List files in the target directory (replace `<path>` with your actual path):**
+   ```bash
+   hdfs dfs -ls /topics/INGESTION/
+   ```
+3. **If missing, upload the records:**
+   - Download or generate the JSON files locally.
+   - Upload to HDFS:
+     ```bash
+     hdfs dfs -put <local-file> /topics/INGESTION/
+     ```
+
+**Why:**  
+Spark jobs can only process data that is available in HDFS. Ensuring the data is present avoids runtime errors.
+
+**Reference:**  
+See Exercise 4 from Lecture 03 and Exercise 7 from Lecture 03 for data generation and ingestion steps.
+
+##### **Step 3: Run the Spark Job on the Cluster**
+
+**What you do:**  
+Submit the Spark job to your cluster to process the JSON files.
+
+**How:**
+1. **Open a shell in your Spark client pod (if not already running):**
+   ```bash
+   kubectl run spark-cli --image=bitnami/spark:3.5.2-debian-12-r1 -- sleep infinity
+   kubectl exec -it spark-cli -- bash
+   ```
+2. **Copy the script to the pod if needed:**
+   ```bash
+   kubectl cp avg-modalities.py spark-cli:/opt/bitnami/spark/e4
+   ```
+3. **Run the Spark job:**
+   ```bash
+   spark-submit avg-modalities.py
+   ```
+
+**Why:**  
+`spark-submit` is the standard way to run Spark applications on a cluster. It distributes the computation across worker nodes for scalability.
+
+##### **Step 4: Interpret the Output**
+
+**What you do:**  
+Review the output printed by the script. It should show the average `payload.modality` for each station.
+
+**Example Output:**
+```
++--------+------------------+
+|station |avg_modality      |
++--------+------------------+
+|1       | 421.5            |
+|2       | 398.2            |
+|...     | ...              |
++--------+------------------+
+```
+
+**Why:**  
+This output tells you the average modality value for each station, which is the goal of the exercise.
+
+
+##### **Summary Table**
+
+| Step | What you do | Why | Technical background |
+|------|-------------|-----|---------------------|
+| 1 | Inspect `avg-modalities.py` | Understand logic | Learn Spark DataFrame operations |
+| 2 | Ensure data in HDFS | Avoid errors | Spark reads from HDFS |
+| 3 | Run `spark-submit` | Process data at scale | Distributed computation |
+| 4 | Interpret output | Get results | Aggregation per station |
+
+
+##### **Extra: What Does the Script Typically Look Like?**
+
+A typical Spark script for this task might look like:
+
+````python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, avg
+
+spark = SparkSession.builder.appName("AvgModalities").getOrCreate()
+
+# Adjust the path as needed
+df = spark.read.json("hdfs://namenode:9000/topics/INGESTION/*.json")
+
+# Compute average modality per station
+result = (
+    df.groupBy(col("station"))
+      .agg(avg(col("payload.modality")).alias("avg_modality"))
+)
+
+result.show()
+spark.stop()
+````
+
+###### **References**
+- [Spark DataFrame API](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.html)
+- [Spark SQL Aggregations](https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select-groupby.html)
+- Lecture 03: Data Ingestion
+
+
 ### Exercise 5 - Average sample values from Avro files stored in HDFS (optional)
 
 Let us assume that you have a dataset of sample records stored in HDFS. The dataset is stored in Avro format and
@@ -377,6 +672,130 @@ in [Exercise 4](#exercise-4---average-sample-values-from-json-files-stored-in-hd
 ```bash
 spark-submit --packages org.apache.spark:spark-avro_2.12:3.5.2 avg-modalities-avro.py
 ```
+
+#### **Solution**
+By following these steps, you learn how to process Avro data in HDFS using Spark, aggregate results efficiently, and interpret distributed computation outputs.
+
+Step-by-Step Solution: Calculating Average `payload.modality` per Station from Avro Files with Spark
+
+##### **Step 1: Inspect the `avg-modalities-avro.py` Script**
+
+**What you do:**  
+Open and review the `avg-modalities-avro.py` script.
+
+**Why:**  
+Understanding the script helps you see how Spark reads Avro data, processes it, and computes averages. Typically, the script will:
+- Read Avro files from HDFS into a Spark DataFrame.
+- Extract relevant fields (`station` and `payload.modality`).
+- Group by station and compute the average modality.
+
+**Technical background:**  
+Spark supports Avro files via the `spark-avro` package. DataFrames make it easy to process structured data and perform aggregations.
+
+##### **Step 2: Ensure Avro Records Exist in HDFS**
+
+**What you do:**  
+Check if your sample Avro records are present in HDFS at the expected location.
+
+**How:**
+1. **Open an HDFS CLI pod:**
+   ```bash
+   kubectl run hdfs-cli -it --image apache/hadoop:3 -- bash
+   ```
+2. **List files in the target directory (replace `<path>` with your actual path):**
+   ```bash
+   hdfs dfs -ls /topics/INGESTION/
+   ```
+3. **If missing, upload the records:**
+   - Download or generate the Avro files locally.
+   - Upload to HDFS:
+     ```bash
+     hdfs dfs -put <local-avro-file> /topics/INGESTION/
+     ```
+
+**Why:**  
+Spark jobs can only process data that is available in HDFS. Ensuring the data is present avoids runtime errors.
+
+**Reference:**  
+See exercise 10 from lecture 02 for data generation steps.
+
+##### **Step 3: Run the Spark Job on the Cluster**
+
+**What you do:**  
+Submit the Spark job to your cluster to process the Avro files.
+
+**How:**
+1. **Open a shell in your Spark client pod (if not already running):**
+   ```bash
+   kubectl run spark-cli --image=bitnami/spark:3.5.2-debian-12-r1 -- sleep infinity
+   ```
+   ```bash
+   kubectl exec -it spark-cli -- bash
+   ```
+2. **Copy the script to the pod if needed:**
+   ```bash
+   kubectl cp avg-modalities-avro.py spark-cli:/opt/bitnami/spark/
+   ```
+3. **Run the Spark job with Avro support:**
+   ```bash
+   spark-submit --packages org.apache.spark:spark-avro_2.12:3.5.2 avg-modalities-avro.py
+   ```
+
+**Why:**  
+The `--packages` argument ensures Spark loads the Avro support library. `spark-submit` distributes the computation across the cluster.
+
+##### **Step 4: Interpret the Output**
+
+**What you do:**  
+Review the output printed by the script. It should show the average `payload.modality` for each station, similar to the JSON exercise.
+
+**Example Output:**
+```
++--------+------------------+
+|station |avg_modality      |
++--------+------------------+
+|1       | 421.5            |
+|2       | 398.2            |
+|...     | ...              |
++--------+------------------+
+```
+
+**Why:**  
+This output tells you the average modality value for each station, confirming your Spark job worked as intended.
+
+##### **Summary Table**
+
+| Step | What you do | Why | Technical background |
+|------|-------------|-----|---------------------|
+| 1 | Inspect `avg-modalities-avro.py` | Understand logic | Learn Spark DataFrame and Avro operations |
+| 2 | Ensure Avro data in HDFS | Avoid errors | Spark reads from HDFS |
+| 3 | Run `spark-submit` with Avro package | Process data at scale | Distributed computation, Avro support |
+| 4 | Interpret output | Get results | Aggregation per station |
+
+##### **Extra: What Does the Script Typically Look Like?**
+
+````python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, avg
+
+spark = SparkSession.builder.appName("AvgModalitiesAvro").getOrCreate()
+
+# Adjust the path as needed
+df = spark.read.format("avro").load("hdfs://namenode:9000/topics/INGESTION/*.avro")
+
+# Compute average modality per station
+result = (
+    df.groupBy(col("station"))
+      .agg(avg(col("payload.modality")).alias("avg_modality"))
+)
+
+result.show()
+spark.stop()
+````
+
+##### **References**
+- [Spark Avro Data Source](https://spark.apache.org/docs/latest/sql-data-sources-avro.html)
+- [Spark DataFrame API](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.html)
 
 ### Exercise 6 - Running Spark Streaming Jobs - Kafka
 
@@ -410,7 +829,183 @@ complete the streaming query:
 - [Operations on streaming DataFrames/Datasets](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html#operations-on-streaming-dataframesdatasets)
 - [Structured Streaming + Kafka Integration Guide](https://spark.apache.org/docs/latest/structured-streaming-kafka-integration.html#structured-streaming-kafka-integration-guide-kafka-broker-versio)
 
-## Step-by-step guide to clean up
+
+#### **Solution**
+By following these steps, you learn how to build a real-time streaming analytics pipeline with Spark and Kafka, and how to compute running aggregates on live data.
+
+**Step-by-Step Solution: Calculating Running Mean from Kafka with Spark Structured Streaming**
+
+##### **Step 1: Understand the Goal and Prerequisites**
+
+**What you do:**  
+You need to create a Spark Structured Streaming job that reads messages from the Kafka topic `INGESTION` and calculates the running mean of the `payload.modality` field for each station (`payload.sensor_id`).
+
+**Why:**  
+Streaming analytics allows you to process data in real-time as it arrives, which is essential for many modern data applications.
+
+**Technical background:**  
+- Spark Structured Streaming provides high-level APIs for real-time data processing.
+- Kafka is used as the streaming source.
+
+##### **Step 2: Prepare Your Environment**
+
+**What you do:**  
+Ensure you have:
+- A running Kafka cluster with the `INGESTION` topic.
+- A Kafka producer sending records to the topic.
+- Spark with the Kafka integration package.
+
+**How:**  
+You will need the following package when running your script:
+```bash
+--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.2
+```
+Create python client pod:
+```bash
+kubectl run python-cli --image=python:3.14-slim -- sleep infinity
+```
+
+Within the python-cli shell:
+```bash
+pip install kafka-python
+```
+
+```bash
+mkdir e4
+```
+
+Located at ~/03/hints/
+```bash
+kubectl cp client.py python-cli:/e4
+```
+
+```bash
+kubectl cp data_model.py python-cli:/e4
+```
+
+```bash
+kubectl cp simple-producer.py python-cli:/e4
+```
+
+```bash
+pip3 simple-producer.py
+```
+
+##### **Step 3: Inspect and Complete `process-streaming.py`**
+
+**What you do:**  
+Open `process-streaming.py` and ensure it:
+- Reads from the Kafka topic.
+- Parses the JSON payload.
+- Extracts `payload.sensor_id` and `payload.modality`.
+- Calculates the running mean per station.
+
+**Why:**  
+This is the core logic for real-time aggregation.
+
+**Technical background:**  
+- Spark reads Kafka messages as key-value pairs (both as bytes).
+- You need to cast and parse the value as JSON.
+- Use groupBy and aggregation functions for running means.
+
+**Example code:**
+
+````python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import from_json, col, avg
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType
+
+# Define schema for the JSON payload
+schema = StructType([
+    StructField("payload", StructType([
+        StructField("sensor_id", StringType()),
+        StructField("modality", DoubleType())
+    ])),
+    StructField("station", StringType())
+])
+
+spark = SparkSession.builder.appName("KafkaStreamingAvg").getOrCreate()
+
+# Read from Kafka
+df = (
+    spark.readStream
+    .format("kafka")
+    .option("kafka.bootstrap.servers", "kafka:9092")
+    .option("subscribe", "INGESTION")
+    .option("startingOffsets", "earliest")
+    .load()
+)
+
+# Parse the JSON value
+json_df = df.select(from_json(col("value").cast("string"), schema).alias("data"))
+
+# Extract fields
+flat_df = json_df.select(
+    col("data.station").alias("station"),
+    col("data.payload.sensor_id").alias("sensor_id"),
+    col("data.payload.modality").alias("modality")
+)
+
+# Calculate running mean per station
+result = (
+    flat_df.groupBy("station")
+    .agg(avg("modality").alias("running_mean_modality"))
+)
+
+# Output to console
+query = (
+    result.writeStream
+    .outputMode("complete")
+    .format("console")
+    .option("truncate", False)
+    .start()
+)
+
+query.awaitTermination()
+````
+
+##### **Step 4: Run the Streaming Job**
+
+**What you do:**  
+Submit your streaming job with the required Kafka package:
+
+```bash
+kubectl cp process-streaming.py spark-cli:/opt/bitnami/spark/e4
+```
+
+Then, within the spark-cli shell, run
+```bash
+spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.2 process-streaming.py
+```
+
+**Why:**  
+This command runs your streaming job, connecting Spark to Kafka.
+
+##### **Step 5: Validate the Output**
+
+**What you do:**  
+Check the console output. You should see the running mean of `payload.modality` for each station, updating as new records arrive.
+
+**Why:**  
+This confirms your streaming job is working and producing real-time analytics.
+
+##### **Summary Table**
+
+| Step | What you do | Why | Technical background |
+|------|-------------|-----|---------------------|
+| 1 | Understand goal & prerequisites | Know what to build | Streaming analytics, Kafka, Spark |
+| 2 | Prepare environment | Ensure all components are ready | Kafka, Spark, producer |
+| 3 | Complete script | Implement logic | Structured Streaming, JSON parsing |
+| 4 | Run job | Start real-time processing | `spark-submit` with Kafka package |
+| 5 | Validate output | Confirm correctness | Console sink, running mean |
+
+
+##### **References**
+- [Structured Streaming Programming Guide](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html)
+- [Structured Streaming + Kafka Integration](https://spark.apache.org/docs/latest/structured-streaming-kafka-integration.html)
+
+
+##### Step-by-step guide to clean up
 
 You will be using HDFS, Kafka and the interactive container in next lecture. However, if you will clean up the
 resources created in this lecture, you can follow the steps below:

@@ -8,7 +8,7 @@ if __name__ == "__main__":
     """
         Usage: pi [partitions]
     """
-    spark = get_spark_context(app_name="Pi estimation", config=SPARK_ENV.LOCAL)
+    spark = get_spark_context(app_name="Pi estimation", config=SPARK_ENV.K8S)
     sc = spark.sparkContext
 
     partitions = int(sys.argv[1]) if len(sys.argv) > 1 else 2
